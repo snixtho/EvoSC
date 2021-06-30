@@ -1,6 +1,4 @@
 {
-  "executeable": "TrackmaniaServer",
-  "login": "",
   "ip": "",
   "port": 0,
   "rpc": {
@@ -26,5 +24,6 @@
     "CurRaceCheckpointsMode": "never"
   },
   "pre-cache-maps": false,
-  "pidfile": ""
+  "pidfile": "",
+  "load-nicknames-from-evo-service": false
 }

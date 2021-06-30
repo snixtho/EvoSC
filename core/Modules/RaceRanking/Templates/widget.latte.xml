@@ -139,7 +139,7 @@
             Integer time;
         }
 
-        declare Vec2 HS_POS;
+        declare Vec2 widgetBasePosition;
         declare CMlFrame HS_Target;
         declare Boolean HS_Hidden;
         declare Integer[] points;
@@ -159,8 +159,11 @@
         declare lastCurrentServerModeName = "";
 
         points.fromjson("{$points}");
+        sleep(10);
 
-        left__ = {config('race-ranking.ui.position') == 'left' ? 'True' : 'False'};
+        wait(CurrentServerModeName != "TM_TimeAttack_Online" && CurrentServerModeName != "TimeAttack");
+
+        left__ = {config('race-ranking.ui.position') == 'left'|ms_bool};
         slot__ = {config('race-ranking.ui.slot')};
         {/block}
 
@@ -168,8 +171,10 @@
         if(CurrentServerModeName != lastCurrentServerModeName){
             lastCurrentServerModeName = CurrentServerModeName;
             if(CurrentServerModeName == "TM_TimeAttack_Online" || CurrentServerModeName == "TimeAttack"){
+                declare Integer LastUiUpdate for This = 0;
                 widgetSetHeight__(0.0);
-                widget.Hide();
+                LastUiUpdate = GameTime;
+                return;
             }else{
                 widgetSetHeight__({config('race-ranking.ui.show', 10)*3+7} * 1.0);
                 widget.Show();

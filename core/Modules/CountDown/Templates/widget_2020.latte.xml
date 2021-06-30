@@ -1,16 +1,38 @@
 {contentType text}
 {extends 'Components.widget-base'}
-{php $dontHide = true;}
+{php $customHideMethod = 'hide';}
+{php $customShowMethod = 'show';}
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manialink version="3">
     {block id}countdown{/block}
-    {block size}44 10{/block}
+    {block size}50 8{/block}
 
     {block content}
-    <label id="cd" pos="44 -1" class="text-lighter" textprefix="$s" scale="3.0" halign="right" value="ayylmao" />
+    <frame pos="-2 1">
+        <label id="cd" pos="50 -1" class="text-lighter" textprefix="$s" scale="3.0" halign="right" />
+        <frame id="added-time-frame" pos="0 -0.25">
+            <label id="label" class="text-lighter" pos="0 -2" text="ADDED TIME" textprefix="$s" textsize="0.7" halign="right" z-index="5" />
+            <label id="added-time" class="text-lighter" pos="0 -4.5" text="" textprefix="$s" halign="right" textsize="1.8" z-index="5" />
+        </frame>
+    </frame>
     {/block}
 
     {block script}
+    <script><!--
+    Void hide(Integer duration){
+        declare label <=> (Page.MainFrame.GetFirstChild("label") as CMlLabel);
+        declare addedTimeLabel <=> (Page.MainFrame.GetFirstChild("added-time") as CMlLabel);
+        AnimMgr.Add(label, "<label opacity='0.0' />", duration, CAnimManager::EAnimManagerEasing::ExpInOut);
+        AnimMgr.Add(addedTimeLabel, "<label opacity='0.0' />", duration, CAnimManager::EAnimManagerEasing::ExpInOut);
+    }
+
+    Void show(Integer duration){
+        declare label <=> (Page.MainFrame.GetFirstChild("label") as CMlLabel);
+        declare addedTimeLabel <=> (Page.MainFrame.GetFirstChild("added-time") as CMlLabel);
+        AnimMgr.Add(label, "<label opacity='1.0' />", duration, CAnimManager::EAnimManagerEasing::ExpInOut);
+        AnimMgr.Add(addedTimeLabel, "<label opacity='1.0' />", duration, CAnimManager::EAnimManagerEasing::ExpInOut);
+    }
+    --></script>
     {/block}
 
     <script><!--
@@ -18,27 +40,62 @@
     {/block}
 
     {block bootScript}
-        declare netread Integer Net_Race_Countdown_CutOffTimeLimit for Teams[0];
-        declare timeRemaining = Net_Race_Countdown_CutOffTimeLimit - GameTime + 1000;
+        declare Real AddedTimeR for This = 0.0;
+        declare netread Integer Net_Race_Helpers_CutOffTimeLimit for Teams[0];
+        declare timeRemaining = Net_Race_Helpers_CutOffTimeLimit - GameTime + 1000;
         declare cd <=> (Page.MainFrame.GetFirstChild("cd") as CMlLabel);
+        declare label <=> (Page.MainFrame.GetFirstChild("label") as CMlLabel);
+        declare addedTimeLabel <=> (Page.MainFrame.GetFirstChild("added-time") as CMlLabel);
+        declare addedTimeFrame <=> (Page.MainFrame.GetFirstChild("added-time-frame") as CMlFrame);
+        declare sign = "";
+        declare currentMapId = Map.Id;
 
-        left__ = {config('countdown.ui.position') == 'left' ? 'True' : 'False'};
+        left__ = {config('countdown.ui.position') == 'left'|ms_bool};
         slot__ = {config('countdown.ui.slot')};
     {/block}
 
     {block loop}
-        timeRemaining = Net_Race_Countdown_CutOffTimeLimit - GameTime + 1000;
+        if(currentMapId != Map.Id){
+            currentMapId = Map.Id;
+            AddedTimeR = 0.0;
+        }
+
+        timeRemaining = Net_Race_Helpers_CutOffTimeLimit - GameTime + 1000;
         if(timeRemaining > 0){
             cd.Value = TL::TimeToText(timeRemaining);
+
+            if(AddedTimeR != 0){
+                if(AddedTimeR < 0){
+                    sign = "";
+                }else{
+                    sign = "+";
+                }
+
+                if(ML::NearestInteger(AddedTimeR) == AddedTimeR){
+                    addedTimeLabel.Value = sign ^ ML::NearestInteger(AddedTimeR) ^ " min";
+                }else{
+                    addedTimeLabel.Value = sign ^ AddedTimeR ^ " min";
+                }
+                addedTimeFrame.RelativePosition_V3[0] = 48.0 - (cd.ComputeWidth(cd.Value) * cd.Scale);
+                addedTimeFrame.Visible = True;
+            }else{
+                addedTimeFrame.Visible = False;
+            }
         }else{
             cd.Value = "";
         }
 
-        if(timeRemaining <= 31000) 
-          cd.TextColor = <0.98, 0.149, 0.149>;
-        else 
-          cd.TextColor = <1., 1., 1.>;
+        if(cd.Value == "" && widget.Size[1] > 0.0){
+            widgetSetHeight__(0.0);
+        }else if(widget.Size[1] == 0.0 && cd.Value != ""){
+            widgetSetHeight__(8.0);
+        }
 
+        if(timeRemaining <= 31000){
+            cd.TextColor = <0.98, 0.149, 0.149>;
+        }else{
+            cd.TextColor = <1., 1., 1.>;
+        }
     {/block}
 
     {block pendingEvents}

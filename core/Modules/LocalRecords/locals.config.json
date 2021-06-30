@@ -8,5 +8,9 @@
   "ui": {
     "position": "left",
     "slot": 10
-  }
+  },
+  "ignore-warmup-times": false,
+  "ignore-round-times": false,
+  "ignore-time-attack-times": false,
+  "show-widget": true
 }

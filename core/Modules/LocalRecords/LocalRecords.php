@@ -10,6 +10,7 @@ use EvoSC\Classes\Module;
 use EvoSC\Classes\Template;
 use EvoSC\Classes\Utility;
 use EvoSC\Controllers\MapController;
+use EvoSC\Controllers\ModeController;
 use EvoSC\Interfaces\ModuleInterface;
 use EvoSC\Models\AccessRight;
 use EvoSC\Models\Map;
@@ -20,6 +21,12 @@ class LocalRecords extends Module implements ModuleInterface
 {
     const TABLE = 'local-records';
 
+    private static bool $showWidget = true;
+    private static bool $ignoreWarmUpTimes = false;
+    private static bool $ignoreRoundsTimes = false;
+    private static bool $ignoreTimeAttackTimes = false;
+    private static bool $isWarmUpOngoing = false;
+
     /**
      * Called when the module is loaded
      *
@@ -28,14 +35,45 @@ class LocalRecords extends Module implements ModuleInterface
      */
     public static function start(string $mode, bool $isBoot = false)
     {
-        Hook::add('PlayerConnect', [self::class, 'playerConnect']);
-        Hook::add('PlayerPb', [self::class, 'playerFinish']);
-        Hook::add('BeginMap', [self::class, 'beginMap']);
+        self::$showWidget = (bool)config('locals.show-widget', true);
+        self::$ignoreWarmUpTimes = (bool)config('locals.ignore-warmup-times', false);
+        self::$ignoreRoundsTimes = (bool)config('locals.ignore-round-times', false);
+        self::$ignoreTimeAttackTimes = (bool)config('locals.ignore-time-attack-times', false);
+
+        if ((self::$ignoreRoundsTimes && ModeController::isRoundsType()) ||
+            (self::$ignoreTimeAttackTimes && ModeController::isTimeAttackType())) {
+            return;
+        }
 
         AccessRight::add('local_delete', 'Delete local-records.');
 
-        ManiaLinkEvent::add('local.delete', [self::class, 'delete'], 'local_delete');
-        ManiaLinkEvent::add('locals.show', [self::class, 'showLocalsTable']);
+        Hook::add('BeginMap', [self::class, 'beginMap']);
+        Hook::add('PlayerFinish', [self::class, 'playerFinish']);
+        Hook::add('Trackmania.WarmUp.StartRound', [self::class, 'warmupStart']);
+        Hook::add('Trackmania.WarmUp.EndRound', [self::class, 'warmupEnd']);
+
+        if (self::$showWidget) {
+            Hook::add('PlayerConnect', [self::class, 'playerConnect']);
+
+            ManiaLinkEvent::add('local.delete', [self::class, 'delete'], 'local_delete');
+            ManiaLinkEvent::add('locals.show', [self::class, 'showLocalsTable']);
+        }
+    }
+
+    /**
+     *
+     */
+    public static function warmupStart()
+    {
+        self::$isWarmUpOngoing = true;
+    }
+
+    /**
+     *
+     */
+    public static function warmupEnd()
+    {
+        self::$isWarmUpOngoing = false;
     }
 
     /**
@@ -54,6 +92,10 @@ class LocalRecords extends Module implements ModuleInterface
      */
     public static function sendLocalsChunk(Player $playerIn = null)
     {
+        if (!self::$showWidget) {
+            return;
+        }
+
         Utility::sendRecordsChunk(self::TABLE, 'locals', 'LocalRecords.update', $playerIn);
     }
 
@@ -67,10 +109,20 @@ class LocalRecords extends Module implements ModuleInterface
         self::sendLocalsChunk($player);
     }
 
+    /**
+     * @param Player $player
+     * @param int $score
+     * @param string $checkpoints
+     * @throws \EvoSC\Exceptions\InvalidArgumentException
+     */
     public static function playerFinish(Player $player, int $score, string $checkpoints)
     {
         if ($score < 3000) {
             //ignore times under 3 seconds
+            return;
+        }
+
+        if (self::$ignoreWarmUpTimes && self::$isWarmUpOngoing) {
             return;
         }
 
@@ -83,7 +135,6 @@ class LocalRecords extends Module implements ModuleInterface
 
         if ($localsLimit == 0) {
             throw new \RuntimeException("Locals limit is zero!");
-            return;
         }
 
         $chatMessage = chatMessage()
@@ -123,10 +174,10 @@ class LocalRecords extends Module implements ModuleInterface
             if ($oldRank == $newRank) {
                 DB::table(self::TABLE)
                     ->updateOrInsert([
-                        'Map' => $map->id,
+                        'Map'    => $map->id,
                         'Player' => $player->id
                     ], [
-                        'Score' => $score,
+                        'Score'       => $score,
                         'Checkpoints' => $checkpoints,
                     ]);
 
@@ -145,12 +196,12 @@ class LocalRecords extends Module implements ModuleInterface
 
                 DB::table(self::TABLE)
                     ->updateOrInsert([
-                        'Map' => $map->id,
+                        'Map'    => $map->id,
                         'Player' => $player->id
                     ], [
-                        'Score' => $score,
+                        'Score'       => $score,
                         'Checkpoints' => $checkpoints,
-                        'Rank' => $newRank,
+                        'Rank'        => $newRank,
                     ]);
 
                 $chatMessage->setParts($player, ' gained the ', secondary($newRank . '.'), ' local record ', secondary(formatScore($score) . ' (' . $oldRank . '. -' . formatScore($diff) . ')'));
@@ -172,12 +223,12 @@ class LocalRecords extends Module implements ModuleInterface
 
             DB::table(self::TABLE)
                 ->updateOrInsert([
-                    'Map' => $map->id,
+                    'Map'    => $map->id,
                     'Player' => $player->id
                 ], [
-                    'Score' => $score,
+                    'Score'       => $score,
                     'Checkpoints' => $checkpoints,
-                    'Rank' => $newRank,
+                    'Rank'        => $newRank,
                 ]);
 
             $chatMessage = $chatMessage->setParts($player, ' gained the ', secondary($newRank . '.'), ' local record ', secondary(formatScore($score)));

@@ -4,6 +4,7 @@ namespace EvoSC\Controllers;
 
 
 use EvoSC\Classes\ChatCommand;
+use EvoSC\Classes\Hook;
 use EvoSC\Classes\Log;
 use EvoSC\Classes\Question;
 use EvoSC\Classes\Server;
@@ -41,7 +42,7 @@ class ChatController implements ControllerInterface
                 Server::chatEnableManualRouting();
                 Log::info('Chat router started.');
             } catch (FaultException $e) {
-                Log::warning($e->getMessage(), isVerbose());
+                Log::warningWithCause('Failed to enable manual chat routing', $e, isVerbose());
             }
         } else {
             Server::chatEnableManualRouting(false);
@@ -158,15 +159,6 @@ class ChatController implements ControllerInterface
      */
     public static function playerChat(Player $player, $text)
     {
-        $questions = Question::getQuestions();
-        if ($questions->has($player->id)) {
-            $question = $questions->get($player->id);
-            $callable = $question->callback;
-            $callable($player, $text);
-            Question::forget($player->id);
-            return;
-        }
-
         Log::write('<fg=yellow>[' . $player . '] ' . $text . '</>', true);
 
         $name = preg_replace('/(?:(?<=[^$])\$s|^\$s)/i', '', $player->NickName);
@@ -175,6 +167,8 @@ class ChatController implements ControllerInterface
         if (strlen(trim(stripAll($text))) == 0) {
             return;
         }
+
+        $text = trim($text);
 
         if ($player->isSpectator()) {
             $name = '$<$eee$> $fff' . $name;
@@ -192,6 +186,7 @@ class ChatController implements ControllerInterface
         $chatText = sprintf('$z$s$%s%s[$<%s$>]%s %s', $groupColor, $groupIcon, secondary($name), $chatColor, $text);
 
         Server::ChatSendServerMessage($chatText);
+        Hook::fire('ChatLine', $chatText);
     }
 
     /**

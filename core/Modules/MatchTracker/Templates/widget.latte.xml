@@ -149,7 +149,7 @@
 
     <script><!--
     {block globals}
-        declare Vec2 HS_POS;
+        declare Vec2 widgetBasePosition;
         declare CMlFrame HS_Target;
         declare Boolean HS_Hidden;
     {/block}
@@ -161,7 +161,7 @@
 
         Points = [{implode(',', $points)}];
 
-        left__ = {config('match-tracker.ui.position') == 'left' ? 'True' : 'False'};
+        left__ = {config('match-tracker.ui.position') == 'left'|ms_bool};
         slot__ = {config('match-tracker.ui.slot')};
     {/block}
 

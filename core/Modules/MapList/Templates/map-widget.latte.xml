@@ -1,6 +1,5 @@
 {contentType text}
 {extends 'Components.widget-base'}
-{php $doNotPause = true;}
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manialink version="3">
     {block id}maps{/block}
@@ -69,7 +68,7 @@
         declare favIconLabel <=> (Page.MainFrame.GetFirstChild("fav-icon") as CMlLabel);
         declare favLabelLabel <=> (Page.MainFrame.GetFirstChild("fav-label") as CMlLabel);
 
-        left__ = {config('map-list.ui.position') == 'left' ? 'True' : 'False'};
+        left__ = {config('map-list.ui.position') == 'left'|ms_bool};
         slot__ = {config('map-list.ui.slot')};
     {/block}
 

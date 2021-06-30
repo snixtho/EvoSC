@@ -10,6 +10,9 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 class MakeMigration extends Command
 {
+    /**
+     * Command settings
+     */
     protected function configure()
     {
         $this->setName('make:migration')
@@ -17,7 +20,12 @@ class MakeMigration extends Command
             ->addArgument('migration_name', InputArgument::REQUIRED, 'The migration name');
     }
 
-    protected function execute(InputInterface $input, OutputInterface $output)
+    /**
+     * @param InputInterface $input
+     * @param OutputInterface $output
+     * @return int
+     */
+    protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $name = $input->getArgument('migration_name');
 
@@ -65,5 +73,7 @@ class {className} extends Migration
         } else {
             $output->writeln('Error: Invalid name entered, please use camel case (example: CreatePlayersTable)');
         }
+
+        return 0;
     }
 }

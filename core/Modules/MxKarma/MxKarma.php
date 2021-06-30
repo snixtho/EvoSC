@@ -62,8 +62,8 @@ class MxKarma extends Module implements ModuleInterface
         /*
         $promise = RestClient::getAsync(self::$apiUrl . '/startSession', [
             'query' => [
-                'serverLogin' => config('server.login'),
-                'applicationIdentifier' => 'EvoSC v' . getEscVersion(),
+                'serverLogin' => Server::getSystemInfo()->serverLogin,
+                'applicationIdentifier' => 'EvoSC v' . getEvoSCVersion(),
                 'testMode' => 'false',
             ]
         ]);

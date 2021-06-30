@@ -1,0 +1,197 @@
+{contentType text}
+{extends 'Components.tabbed-window'}
+{php $window_height = 89;}
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<manialink id="{block id}edit-settings{/block}" version="3">
+    {block icon}{/block}
+    {block title}Edit {$name}{/block}
+
+    {block navbar}
+        {include 'Components.tabs', tabs =>
+            [
+                'Settings'=>'msm.edit,'.$name,
+                'Maps'=>'msm.edit_maps,'.$name,
+                'Folders'=>''
+            ]
+        }
+    {/block}
+
+    {block content}
+    <frame pos="0 -7.5">
+        <label class="text-accent" size="35 4" textsize="0.3" text="Name" valign="center" />
+        <label class="text-accent" pos="116" size="30 4" textsize="0.3" text="Enabled" valign="center" halign="right" />
+    </frame>
+
+    <label id="save" class="text-light save" pos="109 -2.4" size="16 4" textsize="0.6" halign="center" valign="center" text=" SAVE" ScriptEvents="1" z-index="20" focusareacolor1="0000" focusareacolor2="0006" hidden="1" />
+
+    <entry name="matchsettings" default="{$name}" hidden="1" />
+
+    <frame id="folder-pages" pos="0 -8">
+        {foreach $folderChunks as $chunk}
+        <frame hidden="1">
+            {foreach $chunk as $folder}
+            {php $enabled = $enabledFolders->contains($folder->folder);}
+            <frame class="folder" pos="0 {($iterator->counter * -3.5)}" data-id="id">
+                <label pos="113" size="3 3" textsize="0.5" text="{$enabled ? '$fff' : '$333'}" valign="center" />
+                <label size="34 3" textsize="0.6" text="{$folder->folder}" valign="center" />
+                <label class="toggle" pos="-2" size="120 3.5" valign="center" ScriptEvents="1" z-index="-2" focusareacolor1="0000" focusareacolor2="fff3" />
+                <quad class="bg-accent highlight" pos="-2" size="120 3.5" valign="center" z-index="-1" hidden="1" />
+                <entry name="folder_{$folder->folder}" default="{$enabled}" hidden="1" />
+            </frame>
+            {/foreach}
+        </frame>
+        {/foreach}
+    </frame>
+
+    <frame id="pagination" pos="2 -80" scale="0.9">
+        {include 'Components.pagination'}
+    </frame>
+
+    <frame id="search-frame" pos="89 -80" scale="0.9">
+        <label class="text-light" pos="30 0" halign="right" valign="center" textsize="0.9" text="🔍" />
+        <entry id="search-input" class="text-light search-input" pos="26.5 0" size="25 3.5"
+               halign="right" valign="center" style="TextValueSmall" default="" textsize="1.2"/>
+        <label id="clear-search" class="text-light clear-search" pos="0 0" size="3.5 3.5"
+               halign="center" valign="center" textsize="0.25" text="" focusareacolor1="f003"
+               focusareacolor2="f009" ScriptEvents="1" hidden="1"/>
+    </frame>
+    {/block}
+
+    {block scriptDeclarations}
+    <script><!--
+    declare Integer currentPage;
+    declare Integer totalPages;
+    declare Integer perPage;
+    --></script>
+    {/block}
+
+    {block functions}
+    <script><!--
+    Void goToPage(Integer page){
+        declare folderPages <=> (Page.MainFrame.GetFirstChild("folder-pages") as CMlFrame);
+        declare pageInfo <=> (Page.MainFrame.GetFirstChild("page-info") as CMlLabel);
+
+        declare targetPage = page;
+
+        if(targetPage < 0){
+            targetPage = totalPages - 1;
+        }
+        if(targetPage >= totalPages){
+            targetPage = 0;
+        }
+
+        pageInfo.Value = (targetPage + 1) ^ "/" ^ totalPages;
+
+        foreach(pageFrame in folderPages.Controls){
+            pageFrame.Hide();
+        }
+        if(targetPage >= 0 && targetPage < folderPages.Controls.count){
+            folderPages.Controls[targetPage].Show();
+        }
+
+        currentPage = targetPage;
+    }
+
+    Void toggleEnabled(CMlControl parentFrame){
+        declare parent <=> (parentFrame as CMlFrame);
+        declare checkbox <=> (parent.Controls[0] as CMlLabel);
+        declare entryEnabled <=> (parent.Controls[4] as CMlEntry);
+        declare enabled = entryEnabled.Value == "1";
+
+        if(enabled){
+            entryEnabled.Value = "";
+            checkbox.Value = "$333";
+        }else{
+            entryEnabled.Value = "1";
+            checkbox.Value = "$fff";
+        }
+
+        alertUnsavedChanges = True;
+        (Page.MainFrame.GetFirstChild("save") as CMlLabel).Show();
+    }
+
+    Integer search(Text search){
+        declare folderPages <=> (Page.MainFrame.GetFirstChild("folder-pages") as CMlFrame);
+        declare Integer pageN = 0;
+        declare Integer firstMatch = -1;
+        declare hideAll = False;
+
+        if(TL::Trim(search) == ""){
+            hideAll = True;
+        }
+
+        foreach(page in folderPages.Controls){
+            foreach(rowControl in (page as CMlFrame).Controls){
+                declare row = (rowControl as CMlFrame);
+                (row.Controls[5] as CMlQuad).Hide();
+                if(!hideAll){
+                    declare searchString = (row.Controls[1] as CMlLabel).Value ^ " " ^ (row.Controls[2] as CMlLabel).Value;
+                    if(TL::Find(search, searchString, False, False)){
+                        (row.Controls[5] as CMlQuad).Show();
+                        if(firstMatch == -1){
+                            firstMatch = pageN;
+                        }
+                    }
+                }
+            }
+
+            pageN += 1;
+        }
+
+        return firstMatch;
+    }
+    --></script>
+    {/block}
+
+    <script><!--
+    {block bootScript}
+        perPage = 19;
+        currentPage = 0;
+        totalPages = {count($folderChunks)};
+        alertUnsavedChanges = False;
+
+        goToPage(0);
+    {/block}
+
+    {block loop}
+    {/block}
+
+    {block pendingEvents}
+        if(event.Control.HasClass("toggle") && event.Type == CMlScriptEvent::Type::MouseClick){
+            toggleEnabled(event.Control.Parent);
+            continue;
+        }
+
+        if(event.Control.HasClass("save") && event.Type == CMlScriptEvent::Type::MouseClick){
+            TriggerPageAction("msm.save_folders");
+            continue;
+        }
+
+        if(event.Control.HasClass("next-page") && event.Type == CMlScriptEvent::Type::MouseClick){
+            currentPage += 1;
+            goToPage(currentPage);
+            continue;
+        }
+
+        if(event.Control.HasClass("previous-page") && event.Type == CMlScriptEvent::Type::MouseClick){
+            currentPage -= 1;
+            goToPage(currentPage);
+            continue;
+        }
+
+        if(event.Control.HasClass("search-input") && event.Type == CMlScriptEvent::Type::EntrySubmit){
+            currentPage = search((event.Control as CMlEntry).Value);
+            goToPage(currentPage);
+            continue;
+        }
+
+        if(event.Control.HasClass("icon") && event.Type == CMlScriptEvent::Type::MouseClick){
+            if(alertUnsavedChanges && confirm("You have unsaved changes, quit without saving?")){
+                window.Hide();
+                TriggerPageAction("msm.overview");
+                return;
+            }
+        }
+    {/block}
+    --></script>
+</manialink>

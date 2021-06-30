@@ -148,11 +148,11 @@ class ChatMessage
 
         $message = ($this->icon ? '$fff' . $this->icon . ' ' : '') . sprintf('$%s%s', $this->color, $parts);
 
-        if (substr($message, -1) != '.') {
+        if (!in_array(substr($message, -1), ['.', '!', '?'])) {
             $message .= '.';
         }
 
-        return '$z$s' . preg_replace('/(?:(?<=[^$])\$s|^\$s)/i', '', $message);
+        return '$z$s' . preg_replace('/(?:(?<=[^$])\$s|^\$s)/i', '', $message) . '$z';
     }
 
     /**
@@ -160,10 +160,12 @@ class ChatMessage
      */
     public function sendAll()
     {
-        Server::chatSendServerMessage($this->getMessage());
+        $message = $this->getMessage();
+        Server::chatSendServerMessage($message);
+        Hook::fire('ChatLine', $message);
 
-        if(isVerbose()){
-            Log::info($this->getMessage());
+        if (isVerbose()) {
+            Log::info($message);
         }
     }
 
@@ -180,7 +182,11 @@ class ChatMessage
         });
 
         Server::executeMulticall();
-        Log::info($this->getMessage());
+        Hook::fire('ChatLine', $message);
+
+        if (isVerbose()) {
+            Log::info($message);
+        }
     }
 
     /**
@@ -206,7 +212,7 @@ class ChatMessage
                 Log::info($this->getMessage(), isVerbose());
             }
         } catch (\Exception $e) {
-            Log::warning('Failed to deliver message: ' . $e->getMessage());
+            Log::warningWithCause('Failed to deliver message', $e);
         }
     }
 }

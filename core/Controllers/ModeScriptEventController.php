@@ -47,6 +47,7 @@ class ModeScriptEventController implements ControllerInterface
     }
 
     //Decide if the callback should be transformed and fire the hooks.
+
     /**
      * @param $callback
      * @param $arguments
@@ -79,11 +80,6 @@ class ModeScriptEventController implements ControllerInterface
 
                 return;
 
-            case 'Trackmania.Event.Stunt':
-                self::tmStunt($arguments);
-
-                return;
-
             case 'Trackmania.WarmUp.End':
                 Hook::fire('WarmUpEnd');
                 break;
@@ -92,21 +88,15 @@ class ModeScriptEventController implements ControllerInterface
                 Hook::fire('WarmUpStart');
                 break;
 
+            case 'Trackmania.PointsRepartition':
+                Hook::fire('PointsRepartition', json_decode($arguments[0])->pointsrepartition);
+                break;
+
             case 'Maniaplanet.EndRound_Start':
             case 'Maniaplanet.StartMap_Start':
             case 'Maniaplanet.EndMap_Start':
                 Hook::fire($callback);
 
-                return;
-
-            case 'Trackmania.Event.OnPlayerAdded':
-                // self::tmPlayerConnect($arguments);
-                // Handled by {@see EventController}
-                return;
-
-            case 'Trackmania.Event.OnPlayerRemoved':
-                // self::tmPlayerLeave($arguments);
-                // Handled by {@see EventController}
                 return;
 
             default:
@@ -136,6 +126,8 @@ class ModeScriptEventController implements ControllerInterface
                 }
                 Hook::fire('ShowScores', collect($scores->players));
             }
+
+            Hook::fire('Scores', $scores);
         }
     }
 
@@ -146,10 +138,15 @@ class ModeScriptEventController implements ControllerInterface
      */
     static function tmGiveUp($arguments)
     {
-        $playerLogin = json_decode($arguments[0])->login;
+        $data = json_decode($arguments[0]);
+        $player = player($data->login);
 
-        Hook::fire('PlayerFinish', player($playerLogin), 0, "");
-        Hook::fire('PlayerGiveUp', player($playerLogin));
+        Hook::fire('PlayerFinish', $player, 0, "");
+        Hook::fire('PlayerGiveUp', $player);
+
+        if(ModeController::isRoyal()){
+            RoyalController::playerGiveUp($player, $data);
+        }
     }
 
     /**
@@ -166,13 +163,23 @@ class ModeScriptEventController implements ControllerInterface
         Hook::fire('PlayerCheckpoint',
             $player,
             $wayPoint->laptime,
-            count($wayPoint->curlapcheckpoints) - 1,
+            $wayPoint->checkpointinlap,
             $wayPoint->isendlap
         );
 
         //player finished
-        if ($wayPoint->isendlap || $wayPoint->isendrace) {
-            Hook::fire('PlayerFinish',
+        if ($wayPoint->isendrace || (!ModeController::laps() && $wayPoint->isendlap)) {
+            if(ModeController::isRoyal()){
+                RoyalController::playerWayPoint($player, $wayPoint);
+            }else{
+                Hook::fire('PlayerFinish',
+                    $player,
+                    $wayPoint->laptime,
+                    implode(',', $wayPoint->curlapcheckpoints)
+                );
+            }
+        } else if ($wayPoint->isendlap) {
+            Hook::fire('PlayerLap',
                 $player,
                 $wayPoint->laptime,
                 implode(',', $wayPoint->curlapcheckpoints)
@@ -198,49 +205,10 @@ class ModeScriptEventController implements ControllerInterface
      */
     static function tmStartLine($arguments)
     {
-        $playerLogin = json_decode($arguments[0])->login;
-        Hook::fire('PlayerStartLine', player($playerLogin));
-    }
-
-    /**
-     * Disabled: Called when a player does a stunt.
-     *
-     * @param $arguments
-     */
-    static function tmStunt($arguments)
-    {
-        //ignore stunts for now
-    }
-
-    /**
-     * Called on player connect.
-     *
-     * @param $arguments
-     */
-    static function tmPlayerConnect($arguments)
-    {
-        $playerData = json_decode($arguments[0]);
-
-        //string Login, bool IsSpectator
-        if (Player::whereLogin($playerData->login)->get()->isEmpty()) {
-            $player = Player::create(['Login' => $playerData->login, 'NickName' => $playerData->login]);
-        } else {
-            $player = Player::find($playerData->login);
+        $player = player(json_decode($arguments[0])->login);
+        Hook::fire('PlayerStartLine', $player);
+        if(ModeController::isRoyal()){
+            RoyalController::playerStartLine($player, json_decode($arguments[0]));
         }
-
-        Hook::fire('PlayerConnect', $player);
-    }
-
-    /**
-     * Called on player leave.
-     *
-     * @param $arguments
-     */
-    static function tmPlayerLeave($arguments)
-    {
-        $playerData = json_decode($arguments[0]);
-        $player = player($playerData->login);
-
-        Hook::fire('PlayerDisconnect', $player);
     }
 }

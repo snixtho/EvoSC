@@ -155,7 +155,7 @@
         Text nick;
     }
 
-    declare Vec2 HS_POS;
+    declare Vec2 widgetBasePosition;
     declare CMlFrame HS_Target;
     declare Boolean HS_Hidden;
     declare Position[Text] positions;
@@ -168,7 +168,7 @@
 
         positions = Position[Text];
 
-        left__ = {config('cp-pos-tracker.ui.position') == 'left' ? 'True' : 'False'};
+        left__ = {config('cp-pos-tracker.ui.position') == 'left'|ms_bool};
         slot__ = {config('cp-pos-tracker.ui.slot')};
     {/block}
 

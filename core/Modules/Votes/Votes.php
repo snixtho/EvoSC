@@ -45,7 +45,7 @@ class Votes extends Module implements ModuleInterface
         ChatCommand::add('/skip', [self::class, 'askSkip'], 'Start a vote to skip map.');
         ChatCommand::add('/y', [self::class, 'voteYes'], 'Vote yes.');
         ChatCommand::add('/n', [self::class, 'voteNo'], 'Vote no.');
-        ChatCommand::add('/res', [self::class, 'cmdAskMoreTime'], 'Start a vote to add time/points.')
+        ChatCommand::add('/res', [self::class, 'cmdAskMoreTime'], 'Start a vote to add or remove time/points.')
             ->addAlias('/replay')
             ->addAlias('/restart')
             ->addAlias('/points')
@@ -163,9 +163,10 @@ class Votes extends Module implements ModuleInterface
         $voteRatioReached = ($voteState['yes'] / self::$onlinePlayersCount) > self::$vote->success_ratio;
 
         if ($timerRanOut || $everyoneVoted || $voteRatioReached) {
+            $success = false;
             if ($voteRatioReached) {
                 $success = true;
-            } else {
+            } else if ($voteCount > 0) {
                 $success = ($voteState['yes'] / $voteCount) > self::$vote->success_ratio;
             }
 
@@ -210,6 +211,11 @@ class Votes extends Module implements ModuleInterface
                 return;
             }
 
+            if ($secondsToAdd < 0) {
+                warningMessage('Sorry, you\'re not allowed to reduce time.')->send($player);
+                return;
+            }
+
             $oSecondsToAdd = CountdownController::getOriginalTimeLimitInSeconds() * config('votes.time-multiplier');
             if ($secondsToAdd > $oSecondsToAdd) {
                 $secondsToAdd = $oSecondsToAdd;
@@ -242,7 +248,8 @@ class Votes extends Module implements ModuleInterface
             }
         }
 
-        $question = 'Add $<' . secondary(round($secondsToAdd / 60, 1)) . '$> minutes?';
+        $verb = $secondsToAdd > 0 ? 'Add' : 'Subtract';
+        $question = $verb . ' $<' . secondary(abs(round($secondsToAdd / 60, 1))) . '$> minutes?';
 
         $voteStarted = self::startVote($player, $question, function ($success) use ($secondsToAdd, $question) {
             if ($success) {
@@ -284,7 +291,7 @@ class Votes extends Module implements ModuleInterface
             if ($points > $opoints) {
                 $points = $opoints;
             }
-            if (PointsController::getCurrentPoints() >= config('votes.points.max-points')) {
+            if (PointsController::getCurrentPointsLimit() >= config('votes.points.max-points')) {
                 dangerMessage('Point limit reached.')->send($player);
                 return;
             }
@@ -294,7 +301,7 @@ class Votes extends Module implements ModuleInterface
 
         $voteStarted = self::startVote($player, $question, function ($success) use ($points, $question) {
             if ($success) {
-                successMessage('Vote ', secondary($question), ' successful, ', secondary('point-limit is now ' . (PointsController::getCurrentPoints() + $points)), '.')->sendAll();
+                successMessage('Vote ', secondary($question), ' successful, ', secondary('point-limit is now ' . (PointsController::getCurrentPointsLimit() + $points)), '.')->sendAll();
                 PointsController::increasePointsLimit($points);
             } else {
                 dangerMessage('Vote ', secondary($question), ' did not pass.')->sendAll();
@@ -491,7 +498,7 @@ class Votes extends Module implements ModuleInterface
         try {
             $action(true);
         } catch (Error $e) {
-            Log::write($e->getMessage());
+            Log::errorWithCause('Failed to approve vote', $e);
         }
 
         self::$vote = null;
@@ -512,7 +519,7 @@ class Votes extends Module implements ModuleInterface
         try {
             $action(false);
         } catch (Error $e) {
-            Log::write($e->getMessage());
+            Log::errorWithCause('Failed to decline vote', $e);
         }
 
         self::$vote = null;
@@ -531,7 +538,7 @@ class Votes extends Module implements ModuleInterface
             try {
                 $action(false);
             } catch (Error $e) {
-                Log::write($e->getMessage());
+                Log::errorWithCause('Failed to end match', $e);
             }
 
             $voteStateJson = '{"yes":-1,"no":-1}';

@@ -109,7 +109,7 @@ class Template
     public static function hideAll(string $id)
     {
         Server::sendDisplayManialinkPage('', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<manialink version="3" name="ESC:' . $id . '" id="' . $id . '"></manialink>');
+<manialink version="3" name="EvoSC:' . $id . '" id="' . $id . '"></manialink>');
     }
 
     /**
@@ -121,7 +121,7 @@ class Template
     public static function hide(Player $player, string $id)
     {
         Server::sendDisplayManialinkPage($player->Login, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<manialink version="3" name="ESC:' . $id . '" id="' . $id . '"></manialink>');
+<manialink version="3" name="EvoSC:' . $id . '" id="' . $id . '"></manialink>');
     }
 
     /**
@@ -137,7 +137,7 @@ class Template
             try {
                 Server::sendDisplayManialinkPage($login, $xml, 0, false, true);
             } catch (Exception $e) {
-                Log::warning('Failed to render template for ' . $login);
+                Log::warningWithCause("Failed to render template for $login", $e);
             }
         });
 
@@ -149,7 +149,7 @@ class Template
                 try {
                     Server::sendDisplayManialinkPage($login, $xml, 0, false);
                 } catch (Exception $e) {
-                    Log::warning($e->getMessage());
+                    Log::warningWithCause("Failed to render template for $login", $e);
                 }
             });
         }

@@ -36,17 +36,14 @@ class PlayerController implements ControllerInterface
 
     /** @var int */
     private static int $stringEditDistanceThreshold = 8;
-
-    private static Collection $customNames;
-    private static Collection $customNamesByUbiname;
+    private static bool $loadNicknamesFromEvoService = false;
 
     /**
      * Initialize PlayerController
      */
     public static function init()
     {
-        self::$customNames = collect();
-        self::$customNamesByUbiname = collect();
+        self::$loadNicknamesFromEvoService = (bool)config('server.load-nicknames-from-evo-service', false);
         //Add already connected players to the player-list
         self::cacheConnectedPlayers();
 
@@ -72,6 +69,7 @@ class PlayerController implements ControllerInterface
         ManiaLinkEvent::add('forcespec', [self::class, 'forceSpecEvent'], 'player_force_spec');
         ManiaLinkEvent::add('spec', [self::class, 'specPlayer']);
         ManiaLinkEvent::add('mute', [PlayerController::class, 'muteLoginToggle'], 'player_mute');
+        ManiaLinkEvent::add('warn', [self::class, 'warnPlayer'], 'player_warn');
 
         InputSetup::add('leave_spec', 'Leave spectator mode.', [self::class, 'leaveSpec'], 'Delete');
 
@@ -80,10 +78,6 @@ class PlayerController implements ControllerInterface
         ChatCommand::add('//kick', [self::class, 'kickPlayer'], 'Kick player by nickname', 'player_kick');
         ChatCommand::add('//fakeplayer', [self::class, 'addFakePlayer'], 'Adds N fakeplayers.', 'ma');
         ChatCommand::add('/reset-ui', [self::class, 'resetUserSettings'], 'Resets all user-settings to default.');
-
-        if (isTrackmania()) {
-            ChatCommand::add('/setname', [self::class, 'cmdSetName'], 'Change NickName.');
-        }
     }
 
     /**
@@ -99,42 +93,32 @@ class PlayerController implements ControllerInterface
 
     /**
      * @param Player $player
-     * @param $cmd
-     * @param mixed ...$name
-     */
-    public static function cmdSetName(Player $player, $cmd, ...$name)
-    {
-        $name = str_replace("\n", '', trim(implode(' ', $name)));
-        self::setName($player, $name);
-    }
-
-    /**
-     * @param Player $player
      * @param $name
      * @param false $silent
      * @param false $fromCache
      */
     public static function setName(Player $player, $name, $silent = false, $fromCache = false)
     {
+        if ($name == $player->NickName) {
+            return;
+        }
         if (strlen(trim(stripAll($name))) == 0) {
             warningMessage('Your name can not be empty.')->send($player);
             return;
         }
-        if (strlen(stripAll($name)) > 28) {
-            warningMessage('Your name can not exceed 29 characters.')->send($player);
+        if (strlen(stripAll($name)) > 38) {
+            warningMessage('Your name can not exceed 39 characters.')->send($player);
             return;
         }
         $oldName = $player->NickName;
         $player->NickName = $name;
         $player->save();
-        self::$customNames->put($player->Login, $name);
-        self::$customNamesByUbiname->put($player->ubisoft_name, $name);
         self::$players->put($player->Login, $player);
         if (!$silent) {
             infoMessage(secondary($oldName), ' changed their name to ', secondary($name))->sendAll();
-            Cache::put('nicknames/' . $player->Login, $name);
         }
-        self::sendUpdatesCustomNames();
+        Cache::put('nicknames/' . $player->Login, $name);
+        self::playerPoolChanged();
 
         if (!$fromCache) {
             Hook::fire('PlayerChangedName', $player);
@@ -142,34 +126,48 @@ class PlayerController implements ControllerInterface
     }
 
     /**
-     * Sends custom nicknames to the players
+     * @param null $value
      */
-    public static function sendUpdatesCustomNames()
+    public static function playerPoolChanged($value = null)
     {
+        if (isManiaPlanet()) {
+            return;
+        }
+
+        $data = self::$players->map(function (Player $player) {
+            return [
+                'login'   => $player->Login,
+                'name'    => $player->NickName,
+                'ubiname' => $player->ubisoft_name,
+            ];
+        });
+
         Template::showAll('Helpers.update-custom-names', [
-            'keyedByLogin' => self::$customNames,
-            'keyedByUbiname' => self::$customNamesByUbiname
+            'keyedByLogin'   => $data->pluck('name', 'login'),
+            'keyedByUbiname' => $data->pluck('name', 'ubiname')
         ]);
     }
 
     public static function cacheConnectedPlayers()
     {
-        self::$players = collect(Server::getPlayerList(999, 0))->map(function (PlayerInfo $playerInfo) {
+        self::$players = collect(Server::getPlayerList())->map(function (PlayerInfo $playerInfo) {
             $name = $playerInfo->nickName;
 
             if (isTrackmania() && Cache::has('nicknames/' . $playerInfo->login)) {
                 $name = Cache::get('nicknames/' . $playerInfo->login);
-                self::$customNames->put($playerInfo->login, $name);
             }
 
-            return Player::updateOrCreate(['Login' => $playerInfo->login], [
-                'NickName' => $name,
+            $player = Player::updateOrCreate(['Login' => $playerInfo->login], [
+                'NickName'         => $name,
                 'spectator_status' => $playerInfo->spectatorStatus,
-                'player_id' => $playerInfo->playerId
+                'player_id'        => $playerInfo->playerId,
+                'team'             => $playerInfo->teamId
             ]);
+
+            return $player;
         })->keyBy('Login');
 
-        self::sendUpdatesCustomNames();
+        self::playerPoolChanged();
     }
 
     /**
@@ -201,12 +199,12 @@ class PlayerController implements ControllerInterface
      */
     public static function playerConnect(Player $player)
     {
-        if (isManiaPlanet()) {
+        if (isManiaPlanet() || !self::$loadNicknamesFromEvoService) {
             self::announceConnect($player, $player->NickName);
             return;
         }
 
-        RestClient::postAsync(sprintf('https://service.evotm.com/api/nicknames/%s/get', $player->Login), [
+        RestClient::getAsync(sprintf(EVO_API_URL . '/nicknames/%s', $player->Login), [
             'connect_timeout' => 1.5
         ])->then(function (Response $response) use ($player) {
             if ($response->getStatusCode() == 200) {
@@ -275,6 +273,7 @@ class PlayerController implements ControllerInterface
         $player->save();
 
         self::$players->put($player->Login, $player);
+        self::playerPoolChanged();
     }
 
     /**
@@ -297,16 +296,8 @@ class PlayerController implements ControllerInterface
             $message->sendAdmin();
         }
 
-        $player->update([
-            'last_visit' => now(),
-            'player_id' => 0,
-        ]);
-
         self::$players = self::$players->forget($player->Login);
-
-        if (self::$customNames->has($player->Login)) {
-            self::$customNames->forget($player->Login);
-        }
+        self::playerPoolChanged();
     }
 
     /**
@@ -315,14 +306,6 @@ class PlayerController implements ControllerInterface
      */
     public static function beginMap()
     {
-        DB::table('players')
-            ->where('player_id', '>', 0)
-            ->orWhere('spectator_status', '>', 0)
-            ->update([
-                'player_id' => 0,
-                'spectator_status' => 0,
-            ]);
-
         DB::table('players')
             ->where('Score', '>', 0)
             ->update([
@@ -379,19 +362,7 @@ class PlayerController implements ControllerInterface
             return;
         }
 
-        if ($playerToBeKicked->Group < $player->Group) {
-            warningMessage('You can not kick players with a higher group-rank than yours.')->send($player);
-            infoMessage($player, ' tried to kick you but was blocked.')->send($playerToBeKicked);
-            return;
-        }
-
-        $reason = implode(' ', $reason);
-
-        AwaitAction::add($player, "Kick \$<$playerToBeKicked->NickName\$>?", function () use ($playerToBeKicked, $reason, $player) {
-            Server::kick($playerToBeKicked->Login, $reason);
-            warningMessage($player, ' kicked ', $playerToBeKicked->NickName, '. Reason: ',
-                secondary($reason))->setIcon('')->sendAll();
-        });
+        self::kickPlayerEvent($player, $playerToBeKicked->Login, implode(' ', $reason));
     }
 
     /**
@@ -403,14 +374,17 @@ class PlayerController implements ControllerInterface
      */
     public static function kickPlayerEvent(Player $player, $login, $reason = "")
     {
+        /**
+         * @var Player $toBeKicked
+         */
         try {
             $toBeKicked = Player::find($login);
         } catch (\Exception $e) {
             $toBeKicked = $login;
         }
 
-        if ($toBeKicked->Group < $player->Group) {
-            warningMessage('You can not kick players with a higher group-rank than yours.')->send($player);
+        if ($toBeKicked->group->security_level > $player->group->security_level) {
+            warningMessage('You can not kick players with a higher security-level than yours.')->send($player);
             infoMessage($player, ' tried to kick you but was blocked.')->send($toBeKicked);
             return;
         }
@@ -462,10 +436,10 @@ class PlayerController implements ControllerInterface
 
             if (!$hasBetterTime) {
                 DB::table('pbs')->updateOrInsert([
-                    'map_id' => $map->id,
+                    'map_id'    => $map->id,
                     'player_id' => $player->id
                 ], [
-                    'score' => $score,
+                    'score'       => $score,
                     'checkpoints' => $checkpoints
                 ]);
 
@@ -515,6 +489,10 @@ class PlayerController implements ControllerInterface
     {
         infoMessage($player, ' adds ', secondary($count), ' fake players.')->sendAll();
 
+        if (empty($count)) {
+            $count = '1';
+        }
+
         for ($i = 0; $i < intval($count); $i++) {
             Server::connectFakePlayer();
         }
@@ -540,6 +518,15 @@ class PlayerController implements ControllerInterface
             ChatController::unmute($player, $target);
         } else {
             ChatController::mute($player, $target);
+        }
+    }
+
+    public static function warnPlayer(Player $player, string $targetLogin, string $message)
+    {
+        $target = Player::whereLogin($targetLogin)->first();
+
+        if ($target) {
+            warningMessage("You have been warned by $player ", secondary($message))->send($target);
         }
     }
 }

@@ -13,12 +13,14 @@ use Illuminate\Support\Str;
 
 require 'vendor/larapack/dd/src/helper.php';
 
+const EVO_API_URL = "https://api.evotm.com";
+
 /**
  * @return string
  */
 function getEvoSCVersion(): string
 {
-    return str_replace("\n", '', file_get_contents(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'VERSION'));
+    return str_replace(["\r\n", "\r", "\n"], '', file_get_contents(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'VERSION'));
 }
 
 /**
@@ -105,10 +107,10 @@ function formatScore(int $score, bool $cutZero = false): string
 function stripAll(?string $styled = '', bool $keepLinks = false): string
 {
     if ($keepLinks) {
-        return preg_replace('/(?<![$])\${1}(?:[iwngosz<>]{1}|[\w\d]{1,3})/i', '', $styled);
+        return preg_replace('/(?<![$])\${1}(?:[iwngosz<>]{1}|[a-f0-9]{1,3})/i', '', $styled);
     }
 
-    return preg_replace('/(?<![$])\${1}(([lh])(?:\[.+?])|[iwngosz<>]{1}|[\w\d]{1,3})/i', '', $styled);
+    return preg_replace('/(?<![$])\${1}(([lh])(?:\[.+?])|[iwngosz<>]{1}|[a-f0-9]{1,3})/i', '', $styled);
 }
 
 /**
@@ -207,6 +209,15 @@ function baseDir(string $filename = ''): string
 }
 
 /**
+ * @param string $filename
+ * @return string
+ */
+function getOsSafePath(string $filename): string
+{
+    return str_replace('/', DIRECTORY_SEPARATOR, '/' . $filename);
+}
+
+/**
  * @return Collection
  * @todo implement $withSpectators
  */
@@ -251,12 +262,12 @@ function player(string $login, bool $addToOnlineIfOffline = false): Player
 
         if ($data) {
             $player = Player::create([
-                'Login' => $data->login,
+                'Login'    => $data->login,
                 'NickName' => $data->nickName,
             ]);
         } else {
             $player = Player::create([
-                'Login' => $login,
+                'Login'    => $login,
                 'NickName' => $login,
             ]);
         }
@@ -395,13 +406,8 @@ function evo_str_slug($title)
  */
 function restart_evosc()
 {
-    global $__bootedVersion;
-
     if (function_exists('pcntl_exec')) {
-        warningMessage(secondary('EvoSC v' . $__bootedVersion), ' is restarting.')->sendAll();
-        Server::chatEnableManualRouting(false);
-        \EvoSC\Controllers\ModuleController::stopModules();
-        \EvoSC\Controllers\ControllerController::stopControllers();
+        shutdown_evosc(true);
         Log::warning('Old process is terminating.');
         pcntl_exec(PHP_BINARY, $_SERVER['argv']);
         warningMessage('$f00[CRITICAL]', ' Failed to restart EvoSC. Please restart it manually.')->sendAdmin();
@@ -418,6 +424,20 @@ function restart_evosc()
     }
 
     exit(56);
+}
+
+/**
+ * Stops modules & controllers, disconnects chat router
+ */
+function shutdown_evosc(bool $restart = false)
+{
+    global $__bootedVersion;
+
+    $action = $restart ? 'is restarting' : 'is shutting down';
+    warningMessage(secondary('EvoSC v' . $__bootedVersion), $action)->sendAll();
+    Server::chatEnableManualRouting(false);
+    \EvoSC\Controllers\ModuleController::stopModules();
+    \EvoSC\Controllers\ControllerController::stopControllers();
 }
 
 /**
@@ -469,4 +489,16 @@ function require_config(...$configs)
             throw new \EvoSC\Exceptions\MissingConfigValueException("Config value '$config' is not set!");
         }
     }
+}
+
+function serverPlayer(): Player
+{
+    $player = new Player();
+    $player->id = 0;
+    $player->Group = 1;
+    $player->Login = Server::getSystemInfo()->serverLogin;
+    $player->NickName = Server::getServerName();
+    $player->ubisoft_name = Server::getServerName();
+
+    return $player;
 }

@@ -2,10 +2,12 @@
 
 namespace EvoSC\Modules\LiveRankings;
 
+use EvoSC\Classes\Cache;
+use EvoSC\Classes\DB;
 use EvoSC\Classes\Hook;
 use EvoSC\Classes\Module;
+use EvoSC\Classes\Server;
 use EvoSC\Classes\Template;
-use EvoSC\Controllers\MatchController;
 use EvoSC\Controllers\ModeController;
 use EvoSC\Controllers\PointsController;
 use EvoSC\Interfaces\ModuleInterface;
@@ -14,6 +16,11 @@ use Illuminate\Support\Collection;
 
 class LiveRankings extends Module implements ModuleInterface
 {
+    private static $shownLogins = [];
+    private static $lapTracker = [];
+    private static $sectionTracker = [];
+    private static $numberOfLaps = -1;
+
     /**
      * Called when the module is loaded
      *
@@ -22,11 +29,163 @@ class LiveRankings extends Module implements ModuleInterface
      */
     public static function start(string $mode, bool $isBoot = false)
     {
+        Hook::add('PlayerInfoChanged', [self::class, 'checkIfViewIsAffected']);
+        Hook::add('PlayerDisconnect', [self::class, 'checkIfViewIsAffected']);
         Hook::add('PlayerConnect', [self::class, 'playerConnect']);
-        Hook::add('MatchTrackerUpdated', [self::class, 'sendUpdatedValues']);
 
-        if(!$isBoot) {
+        if (ModeController::isTimeAttackType()) {
+            if (ModeController::isRoyal()) {
+                Hook::add('Scores', [self::class, 'updateWidget']);
+                Hook::add('PlayerFinishSection', [self::class, 'playerFinishSection']);
+            } else {
+                Hook::add('Scores', [self::class, 'updateWidget']);
+                Hook::add('PlayerFinish', function ($player, $score) {
+                    if ($score > 0) {
+                        Server::callGetScores();
+                    }
+                });
+            }
+        } else if (ModeController::laps()) {
+            Hook::add('PlayerFinish', [self::class, 'playerLap']);
+            Hook::add('PlayerLap', [self::class, 'playerLap']);
+            Hook::add('BeginMatch', [self::class, 'resetLapsTracker']);
+            Hook::add('EndMap', [self::class, 'resetLapsTracker']);
+
+            self::$numberOfLaps = Server::getCurrentMapInfo()->nbLaps;
+        } else {
+            Hook::add('Scores', [self::class, 'updateWidget']);
+        }
+
+        if (!$isBoot) {
             Template::showAll('LiveRankings.widget', ['originalPointsLimit' => PointsController::getOriginalPointsLimit()]);
+        }
+    }
+
+    /**
+     * @throws \Exception
+     */
+    public function stop()
+    {
+        if (ModeController::isRoyal()) {
+            Cache::put('live_ranking_sections', self::$sectionTracker, now()->addMinute());
+        }
+    }
+
+    public static function resetLapsTracker()
+    {
+        self::$lapTracker = [];
+        self::updateWidget(collect(self::$lapTracker));
+    }
+
+    public static function playerFinishSection(Player $player, int $score, array $checkpoints, int $section)
+    {
+        $id = $player->id;
+        if (!array_key_exists($id, self::$sectionTracker)) {
+            self::$sectionTracker[$id] = (object)[
+                'laps'         => 0,
+                'login'        => $player->Login,
+                'matchpoints'  => 0,
+                'roundpoints'  => 0,
+                'bestracetime' => 0,
+                'team'         => 0,
+                'section'      => 0,
+            ];
+        }
+
+        self::$sectionTracker[$id]->section++;
+        self::$sectionTracker[$id]->bestracetime += $score;
+        self::updateWidget(collect(self::$sectionTracker));
+    }
+
+    public static function playerLap(Player $player, $score, $checkpointsString)
+    {
+        $id = $player->id;
+        if (!array_key_exists($id, self::$lapTracker)) {
+            self::$lapTracker[$id] = (object)[
+                'laps'         => 0,
+                'login'        => $player->Login,
+                'matchpoints'  => 0,
+                'roundpoints'  => 0,
+                'bestracetime' => 0,
+                'team'         => 0,
+                'section'      => 0,
+            ];
+        }
+
+        self::$lapTracker[$id]->laps++;
+        self::updateWidget(collect(self::$lapTracker));
+    }
+
+    /**
+     * @param $scores
+     */
+    public static function updateWidget($scores)
+    {
+        if ($scores instanceof Collection) {
+            $playerScores = $scores;
+        } else {
+            $playerScores = collect($scores->players);
+        }
+
+        if (ModeController::isTimeAttackType()) {
+            if (ModeController::isRoyal()) {
+                $playerScores = $playerScores->filter(function ($playerScore) {
+                    return $playerScore->section > 0;
+                })->sortByDesc('section');
+            } else {
+                $playerScores = $playerScores->filter(function ($playerScore) {
+                    return $playerScore->bestracetime > 0;
+                })->sortBy('bestracetime');
+            }
+        } else {
+            if (ModeController::laps()) {
+                $playerScores = $playerScores->sortByDesc('laps')->filter(function ($playerScore) {
+                    return ($playerScore->laps ?? 0) > 0;
+                });
+            } else {
+                $playerScores = $playerScores->sortByDesc('matchpoints')->filter(function ($playerScore) {
+                    return $playerScore->matchpoints > 0;
+                });
+            }
+        }
+
+        $playerScores = $playerScores->take(config('live - rankings . show', 14));
+        self::$shownLogins = $playerScores->pluck('login')->toArray();
+
+        $playerInfo = DB::table('players')
+            ->select(['Login', 'NickName', 'player_id', 'spectator_status'])
+            ->whereIn('Login', $playerScores->pluck('login'))
+            ->get()
+            ->keyBy('Login');
+
+        $top = $playerScores->map(function ($playerScore) use ($playerInfo) {
+            $info = $playerInfo->get($playerScore->login);
+
+            return [
+                'name'        => $info->NickName,
+                'login'       => $playerScore->login,
+                'points'      => $playerScore->matchpoints,
+                'gained'      => $playerScore->roundpoints,
+                'score'       => $playerScore->bestracetime,
+                'team'        => $playerScore->team,
+                'laps'        => $playerScore->laps,
+                'section'     => $playerScore->section,
+                'checkpoints' => '',
+                'online'      => $info->player_id > 0,
+                'spectator'   => $info->spectator_status > 0,
+            ];
+        })->values();
+
+        Template::showAll('LiveRankings.update', compact('top'));
+    }
+
+    /**
+     * @param Player $player
+     */
+    public static function checkIfViewIsAffected(Player $player)
+    {
+        if (in_array($player->Login, self::$shownLogins)) {
+            Server::callGetScores(); //Force server to send scores callback
         }
     }
 
@@ -36,25 +195,19 @@ class LiveRankings extends Module implements ModuleInterface
      */
     public static function playerConnect(Player $player)
     {
-        self::sendUpdatedValues(MatchController::getTracker());
+        $originalPointsLimit = -1;
+        $nbLaps = -1;
 
-        $originalPointsLimit = PointsController::getOriginalPointsLimit();
-        Template::show($player, 'LiveRankings.widget', compact('originalPointsLimit'));
-    }
-
-    /**
-     * @param Collection $top
-     */
-    public static function sendUpdatedValues(Collection $top)
-    {
-        $showTop = config('live-rankings.show', 14);
-
-        if(ModeController::isTimeAttackType()){
-            $top = $top->sortBy('score')->take($showTop)->values();
-        }else{
-            $top = $top->sortByDesc('points')->take($showTop)->values();
+        if (ModeController::laps()) {
+            $nbLaps = self::$numberOfLaps; //TODO: Check why S_ForceLapsNb does not have any effect and send correct value here instead
+            self::updateWidget(collect(self::$lapTracker));
+        } else {
+            Server::callGetScores();
+            if (ModeController::teams()) {
+                $originalPointsLimit = PointsController::getOriginalPointsLimit();
+            }
         }
 
-        Template::showAll('LiveRankings.update', compact('top'));
+        Template::show($player, 'LiveRankings.widget', compact('originalPointsLimit', 'nbLaps'));
     }
 }

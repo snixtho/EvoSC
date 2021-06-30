@@ -288,12 +288,17 @@ class QueueController implements ControllerInterface
                 try {
                     Server::chooseNextMap($map->filename);
                 } catch (\Exception $e) {
-                    Log::error('Failed to pre-cache map ' . $map->name . ': ' . $e->getMessage(), true);
-                    Log::write($e->getMessage(), isVerbose());
+                    Log::errorWithCause('Failed to pre-cache map ' . $map->name, $e);
 
                     self::dropMapSilent($map->uid);
                 }
             }
         }
+    }
+
+    public static function dropAllMaps()
+    {
+        MapQueue::truncate();
+        Hook::fire('MapQueueUpdated', collect([]));
     }
 }

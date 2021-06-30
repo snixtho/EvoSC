@@ -133,32 +133,11 @@ class ManiaLinkEvent
         }
 
         if (isVeryVerbose()) {
-            Log::write("$action", true);
+            Log::write("$action");
         }
 
-        if (preg_match('/^(.+)::(.+?),/', $action, $matches)) {
-            $callback = [$matches[1], $matches[2]];
-        } else if (preg_match('/(\w+[.\w]+)*(?:,[\d\w ]+)*/', $action, $matches)) {
-            $event = self::getManiaLinkEvents()->where('id', $matches[1])->first();
-
-            if (!$event) {
-                Log::warning("Calling undefined ManiaLinkEvent $action.");
-
-                return;
-            }
-
-            if ($event->access != null && !$ply->hasAccess($event->access)) {
-                warningMessage('Sorry, you\'re not allowed to do that.')->send($ply);
-                Log::write('Player ' . $ply . ' tried to access forbidden ManiaLinkEvent: ' . $event->id . ' -> ' . implode('::',
-                        $event->callback));
-
-                return;
-            }
-
-            $callback = $event->callback;
-        } else {
-            Log::warning("Malformed ManiaLinkEvent $action.");
-
+        $callback = self::getCallback($ply, $action);
+        if (is_null($callback)) {
             return;
         }
 
@@ -170,18 +149,74 @@ class ManiaLinkEvent
             foreach ($formValues as $value) {
                 $formValuesObject->{$value['Name']} = $value['Value'];
             }
+            $formValuesObject = self::mapFormValues($formValuesObject);
             array_push($arguments, $formValuesObject);
         }
 
         try {
             call_user_func_array($callback, $arguments);
         } catch (UnauthorizedException $e) {
+            Log::warningWithCause("Player $ply is not allowed to execute action $action", $e);
             warningMessage('Sorry, you\'re not allowed to do that.')->send($ply);
-            Log::warning($e->getMessage());
         } catch (Exception $e) {
-            Log::error("An error occured calling " . $callback[0] . '::' . $callback[1] . ": " . $e->getMessage());
-            Log::write($e->getTraceAsString(), isVerbose());
+            $message = "An error occured calling " . $callback[0] . '::' . $callback[1];
+            Log::errorWithCause($message, $e);
         }
+    }
+
+    /**
+     * @param string $action
+     * @return array|null
+     */
+    public static function getCallback(Player $player, string $action)
+    {
+        if (preg_match('/^(.+)::(.+?),/', $action, $matches)) {
+            return [$matches[1], $matches[2]];
+        } else if (preg_match('/(\w+[.\w]+)*(?:,[\d\w ]+)*/', $action, $matches)) {
+            $event = self::getManiaLinkEvents()->where('id', $matches[1])->first();
+
+            if (!$event) {
+                Log::warning("Calling undefined ManiaLinkEvent $action.");
+
+                return null;
+            }
+
+            if ($event->access != null && !$player->hasAccess($event->access)) {
+                warningMessage('Sorry, you\'re not allowed to do that.')->send($player);
+                Log::warning('Player ' . $player . ' tried to access forbidden ManiaLinkEvent: ' . $event->id . ' -> ' . implode('::',
+                        $event->callback));
+
+                return null;
+            }
+
+            return $event->callback;
+        }
+
+        Log::warning("Malformed ManiaLinkEvent $action.");
+        return null;
+    }
+
+    private static function mapFormValues(\stdClass $values): \stdClass
+    {
+        $arrays = [];
+        $out = $values;
+
+        foreach ($values as $key => $value) {
+            if (preg_match('/^(.+)\[([0-9]+)]$/', $key, $matches)) {
+                $name = $matches[1];
+                if (!array_key_exists($name, $arrays)) {
+                    $arrays[$name] = [];
+                }
+                $arrays[$name][intval($matches[2])] = ($value instanceof \stdClass) ? self::mapFormValues($value) : $value;
+                unset($out->{$key});
+            }
+        }
+
+        foreach ($arrays as $key => $mappedArray) {
+            $out->{$key} = $mappedArray;
+        }
+
+        return $out;
     }
 
     public static function removeAll()
